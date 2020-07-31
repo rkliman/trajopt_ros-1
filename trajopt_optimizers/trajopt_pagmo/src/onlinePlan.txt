@@ -1,0 +1,77 @@
+------------------
+This code can be used to replace the onlinePlan() function from the code in tesseract_ros's online_planning_example.cpp
+Written by Randall Kliman
+------------------
+
+
+
+bool OnlinePlanningExample::onlinePlan() // Pagmo Version
+{
+  ros::spinOnce();
+  pagmo::compass_search uda(10, 0.1, 1e-6, 0.5);
+  // pagmo::nlopt uda("slsqp");
+  pagmo::algorithm algo{ uda };
+  trajopt_pagmo::PagmoSolver solver{ algo };
+
+  //SETUP SECTION
+  // 1 - Instantiate a pagmo problem constructing it from a UDP
+  // (user defined problem).
+  trajopt_pagmo::PagmoProblemInterface pagmo_interface{};
+  pagmo_interface.init(nlp_);
+  pagmo_interface.use_gradient_ = false;//config_.use_gradient_;
+  pagmo::problem pagmo_problem{ pagmo_interface };
+
+
+  // 2 - Instantiate a population
+  pagmo::population pop{ pagmo_problem, 1, 0u};
+
+
+  console_bridge::setLogLevel(console_bridge::LogLevel::CONSOLE_BRIDGE_LOG_INFO);
+
+  using namespace std::chrono;
+  Eigen::VectorXd x = nlp_.GetOptVariables()->GetValues();
+  while (realtime_running_ && ros::ok())
+  {
+    ros::spinOnce();
+    auto start = high_resolution_clock::now();
+
+    // 3 - Set Initial Values
+    Eigen::VectorXd var_vals = nlp_.GetOptVariables()->GetValues();
+    std::vector<double> init_vals(var_vals.data(), var_vals.data() + var_vals.rows() * var_vals.cols());
+
+    std::cout << "Init vals:" << '\n';
+    for(auto i : init_vals)
+    {
+      std::cout << i << " ";
+    }
+    std::cout << '\n';
+
+    for(size_t i = 0; i < 1 ; i++){
+        pop.set_x(i,init_vals);
+    }
+
+    // 4 - Evolve the population
+    pop = algo.evolve(pop);
+
+    // 5 - Set the results
+    pagmo::vector_double results = pop.champion_x();
+    nlp_.SetVariables(results.data());
+
+
+    auto stop = high_resolution_clock::now();
+    auto duration = duration_cast<microseconds>(stop - start) / static_cast<double>(1);
+
+    // Update manipulator joint values
+    Eigen::Map<trajopt::TrajArray> trajectory(results.data(), steps_, 8);
+    std::cout << "Trajectory: " << '\n' << trajectory << '\n';
+    current_trajectory_.block(0, 0, steps_, 8) = trajectory;
+
+    // Display Results
+    plotter_->plotTrajectory(joint_names_, current_trajectory_);
+
+    // std::string message =
+    //     "Solver Frequency (Hz): " + std::to_string(1.0 / static_cast<double>(duration.count()) * 1000000.) +
+    //     "\nCost: " + std::to_string(nlp_.EvaluateCostFunction(results.data()));
+    // std::cout << message << std::endl;
+  }
+}
